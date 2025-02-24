@@ -15,6 +15,7 @@ const Index = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [apiKey, setApiKey] = useState(DEFAULT_API_KEY);
+  const [progress, setProgress] = useState(0);
 
   const handleImageChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
@@ -43,22 +44,22 @@ const Index = () => {
 
   const processImages = async (files: File[]): Promise<any[]> => {
     const results = [];
-    for (let i = 0; i < files.length; i += 5) { // Process 5 images at a time
-      const batch = files.slice(i, i + 5);
-      const base64Images = await Promise.all(
-        batch.map(file => new Promise<string>((resolve) => {
+    const total = files.length;
+    
+    for (let i = 0; i < files.length; i++) {
+      try {
+        const file = files[i];
+        const base64 = await new Promise<string>((resolve) => {
           const reader = new FileReader();
           reader.onload = () => {
             const base64 = reader.result?.toString().split(',')[1] || '';
             resolve(base64);
           };
           reader.readAsDataURL(file);
-        }))
-      );
+        });
 
-      try {
         const response = await axios.post('https://api.plant.id/v2/identify', {
-          images: base64Images,
+          images: [base64],
           plant_details: ["common_names", "wiki_description", "taxonomy"],
         }, {
           headers: {
@@ -66,12 +67,22 @@ const Index = () => {
             'Api-Key': apiKey
           }
         });
-        results.push(...response.data.suggestions);
+
+        if (response.data.suggestions && response.data.suggestions.length > 0) {
+          results.push(response.data.suggestions[0]); // Take the best match for each image
+        }
+
+        // Update progress
+        setProgress(Math.round(((i + 1) / total) * 100));
+        
+        // Add a small delay to avoid overwhelming the API
+        await new Promise(resolve => setTimeout(resolve, 100));
+
       } catch (error) {
-        console.error('Error processing batch:', error);
+        console.error('Error processing image:', error);
         toast({
           title: "Error",
-          description: "Failed to process some images. Please try again.",
+          description: `Failed to process image ${i + 1}. Continuing with remaining images...`,
           variant: "destructive",
         });
       }
@@ -111,6 +122,7 @@ const Index = () => {
     }
 
     setIsLoading(true);
+    setProgress(0);
     try {
       const results = await processImages(selectedImages);
       setResult({ suggestions: results });
@@ -136,6 +148,7 @@ const Index = () => {
       });
     } finally {
       setIsLoading(false);
+      setProgress(0);
     }
   };
 
@@ -185,6 +198,15 @@ const Index = () => {
                 )}
               </div>
             )}
+
+            {isLoading && progress > 0 && (
+              <div className="w-full bg-gray-200 rounded-full h-2.5">
+                <div 
+                  className="bg-green-600 h-2.5 rounded-full transition-all duration-300"
+                  style={{ width: `${progress}%` }}
+                ></div>
+              </div>
+            )}
           </div>
 
           <Button
@@ -195,7 +217,7 @@ const Index = () => {
             {isLoading ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Processing...
+                Processing {progress}%...
               </>
             ) : (
               <>
@@ -232,3 +254,4 @@ const Index = () => {
 };
 
 export default Index;
+
