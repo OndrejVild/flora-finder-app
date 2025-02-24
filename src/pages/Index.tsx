@@ -3,9 +3,11 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/use-toast";
-import { Upload, Loader2, Download } from "lucide-react";
-import axios from "axios";
-import * as XLSX from 'xlsx';
+import { Upload, Loader2 } from "lucide-react";
+import { ImageUploader } from "@/components/ImageUploader";
+import { processImages } from "@/services/plantIdentification";
+import { generateExcel } from "@/utils/excelUtils";
+import { PlantResults } from "@/components/PlantResults";
 
 const DEFAULT_API_KEY = "JcKbI5tW8Wf8nbsOLf1ty1voZCiCpaGywM9n7kUuBA5QvZxLyI";
 
@@ -17,89 +19,14 @@ const Index = () => {
   const [apiKey, setApiKey] = useState(DEFAULT_API_KEY);
   const [progress, setProgress] = useState(0);
 
-  const handleImageChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = event.target.files;
-    if (files) {
-      const fileArray = Array.from(files);
-      if (fileArray.length > 1000) {
-        toast({
-          title: "Too many files",
-          description: "Please select up to 1000 images",
-          variant: "destructive",
-        });
-        return;
-      }
-      setSelectedImages(fileArray);
-      if (fileArray.length > 0) {
-        const url = URL.createObjectURL(fileArray[0]);
-        setPreviewUrl(url);
-        setResult(null);
-      }
-    }
+  const handleImagesSelected = (files: File[], preview: string | null) => {
+    setSelectedImages(files);
+    setPreviewUrl(preview);
+    setResult(null);
   };
 
   const handleApiKeyChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setApiKey(event.target.value);
-  };
-
-  const processImages = async (files: File[]): Promise<any[]> => {
-    const results = [];
-    const total = files.length;
-    
-    for (let i = 0; i < files.length; i++) {
-      try {
-        const file = files[i];
-        const base64 = await new Promise<string>((resolve) => {
-          const reader = new FileReader();
-          reader.onload = () => {
-            const base64 = reader.result?.toString().split(',')[1] || '';
-            resolve(base64);
-          };
-          reader.readAsDataURL(file);
-        });
-
-        const response = await axios.post('https://api.plant.id/v2/identify', {
-          images: [base64],
-          plant_details: ["common_names", "wiki_description", "taxonomy"],
-        }, {
-          headers: {
-            'Content-Type': 'application/json',
-            'Api-Key': apiKey
-          }
-        });
-
-        if (response.data.suggestions && response.data.suggestions.length > 0) {
-          results.push(response.data.suggestions[0]); // Take the best match for each image
-        }
-
-        // Update progress
-        setProgress(Math.round(((i + 1) / total) * 100));
-        
-        // Add a small delay to avoid overwhelming the API
-        await new Promise(resolve => setTimeout(resolve, 100));
-
-      } catch (error) {
-        console.error('Error processing image:', error);
-        toast({
-          title: "Error",
-          description: `Failed to process image ${i + 1}. Continuing with remaining images...`,
-          variant: "destructive",
-        });
-      }
-    }
-    return results;
-  };
-
-  const generateExcel = (data: any[]) => {
-    const workbook = XLSX.utils.book_new();
-    const worksheet = XLSX.utils.json_to_sheet(data.map(item => ({
-      'Plant Name': item.plant_name,
-      'Common Names': item.plant_details?.common_names?.join(', ') || '',
-      'Confidence': `${Math.round(item.probability * 100)}%`,
-    })));
-    
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Plant Identification Results');
-    XLSX.writeFile(workbook, 'plant-identification-results.xlsx');
   };
 
   const handleUpload = async () => {
@@ -124,7 +51,7 @@ const Index = () => {
     setIsLoading(true);
     setProgress(0);
     try {
-      const results = await processImages(selectedImages);
+      const results = await processImages(selectedImages, apiKey, setProgress);
       setResult({ suggestions: results });
       
       if (selectedImages.length > 1) {
@@ -176,13 +103,7 @@ const Index = () => {
               />
             </div>
 
-            <Input
-              type="file"
-              accept="image/*"
-              multiple
-              onChange={handleImageChange}
-              className="file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-green-50 file:text-green-700 hover:file:bg-green-100"
-            />
+            <ImageUploader onImagesSelected={handleImagesSelected} />
             
             {previewUrl && (
               <div className="relative aspect-video w-full overflow-hidden rounded-lg border border-gray-200">
@@ -228,24 +149,7 @@ const Index = () => {
           </Button>
 
           {result && result.suggestions && result.suggestions.length > 0 && selectedImages.length === 1 && (
-            <div className="mt-6 space-y-4">
-              <h2 className="text-xl font-semibold text-green-800">Results</h2>
-              {result.suggestions.map((suggestion: any, index: number) => (
-                <div key={index} className="bg-white/90 rounded-lg p-4 shadow-sm">
-                  <h3 className="font-medium text-lg">{suggestion.plant_name}</h3>
-                  {suggestion.plant_details?.common_names && (
-                    <p className="text-gray-600 text-sm">
-                      Common names: {suggestion.plant_details.common_names.join(", ")}
-                    </p>
-                  )}
-                  {suggestion.probability && (
-                    <p className="text-sm text-green-600 mt-1">
-                      Confidence: {Math.round(suggestion.probability * 100)}%
-                    </p>
-                  )}
-                </div>
-              ))}
-            </div>
+            <PlantResults suggestions={result.suggestions} />
           )}
         </div>
       </div>
